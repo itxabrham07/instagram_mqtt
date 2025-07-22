@@ -15,14 +15,14 @@ export async function connectDb() {
     throw new Error('MongoDB is disabled in configuration');
   }
 
-  if (!config.database.url) {
+  if (!config.database.uri) {
     throw new Error('MongoDB URL is not configured');
   }
 
   try {
     logger.info('🔌 Connecting to MongoDB...');
     
-    client = new MongoClient(config.database.url, {
+    client = new MongoClient(config.database.uri, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,

@@ -58,8 +58,16 @@ export class InstagramRealtimeBot {
       // Setup realtime event listeners
       this.setupRealtimeListeners();
       
-      // Get initial inbox data for iris subscription
-      const inboxData = await this.ig.feed.directInbox().request();
+      // Try to get initial inbox data for iris subscription
+      let inboxData = null;
+      try {
+        inboxData = await this.ig.feed.directInbox().request();
+      } catch (error) {
+        logger.warn('⚠️ Cannot access inbox (account may be flagged), using fallback polling...');
+        // Start fallback polling instead
+        await this.startFallbackPolling();
+        return;
+      }
       
       // Connect to realtime with subscriptions
       await this.ig.realtime.connect({
@@ -73,8 +81,8 @@ export class InstagramRealtimeBot {
         
         // Iris subscription for direct messages
         irisData: {
-          seq_id: inboxData?.seq_id || 0,
-          snapshot_at_ms: inboxData?.snapshot_at_ms || Date.now()
+          seq_id: inboxData.seq_id || 0,
+          snapshot_at_ms: inboxData.snapshot_at_ms || Date.now()
         },
         
         // Connection settings
@@ -248,9 +256,9 @@ export class InstagramRealtimeBot {
 
   async handleReconnection() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error('❌ Max reconnection attempts reached. Stopping bot.');
-      // Don't exit, just log the error and stop trying
-      logger.error('🛑 Realtime connection failed permanently. Bot will continue without realtime features.');
+      logger.error('❌ Max realtime reconnection attempts reached.');
+      logger.info('🔄 Switching to fallback polling mode...');
+      await this.startFallbackPolling();
       return;
     }
 
