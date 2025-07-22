@@ -1,179 +1,221 @@
-# Instagram Realtime and FBNS
+# Instagram Realtime Bot
 
-This library isn't actively maintained anymore. Only bug fixes are accepted.
+A modern Instagram bot built with real-time MQTT connections to avoid polling and reduce the risk of being flagged by Instagram.
 
-## Getting started
+## 🚀 Features
 
--  Install the library
+- **Real-time MQTT Connection**: No more polling! Uses Instagram's official MQTT protocol
+- **Anti-Flag Protection**: Much safer than traditional polling bots
+- **Modular Architecture**: Easy to extend with custom modules
+- **Command System**: Prefix-based commands (e.g., `.help`, `.ping`)
+- **Telegram Integration**: Optional Telegram bridge for notifications
+- **Admin System**: Role-based command access
+- **Auto-reconnection**: Robust connection handling with exponential backoff
+- **Rate Limiting**: Built-in protection against spam
+- **Database Integration**: MongoDB for persistent storage
 
-   ```sh
-   npm i instagram_mqtt
+## 🛡️ Why Real-time MQTT?
+
+Traditional Instagram bots use polling (constantly checking for new messages), which:
+- Creates suspicious API patterns
+- Increases ban risk
+- Wastes resources
+- Has delays
+
+This bot uses Instagram's real-time MQTT protocol:
+- ✅ Instant message delivery
+- ✅ Natural connection patterns
+- ✅ Lower ban risk
+- ✅ More efficient
+
+## 📦 Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd instagram-realtime-bot
    ```
 
--  Extend the `IgApiClient`
-
-   ```typescript
-   import { value IgApiClient } from 'instagram-private-api';
-   import { value withFbnsAndRealtime, value withFbns, value withRealtime } from 'instagram_mqtt';
-
-   // wrap the client
-   // ig is now IgApiClientMQTT for typescript users
-   const ig = withFbnsAndRealtime(new IgApiClient());
-
-   // OR if you only want fbns/realtime
-   const igFbns = withFbns(new IgApiClient());
-   const igRealtime = withRealtime(new IgApiClient());
-
-   // login like you usually do or load the state
-
-   // use ig.realtime and ig.fbns
+2. **Install dependencies**
+   ```bash
+   npm install
    ```
 
--  [Look at the examples](examples)
+3. **Setup environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-## RealtimeClient
+4. **Setup MongoDB** (optional but recommended)
+   ```bash
+   # Install MongoDB locally or use MongoDB Atlas
+   # Update MONGODB_URL in .env
+   ```
 
-The RealtimeClient is used, as the name implies, for in-app communication.
-Everything using some kind of event is communicating over this client.
+## ⚙️ Configuration
 
-### Features
+Edit your `.env` file:
 
--  Typing Events
--  Presence Events
--  Direct Messaging
--  Live Comments
--  Live Events
+```env
+# Instagram Configuration
+IG_USERNAME=your_instagram_username
+IG_MARK_AS_SEEN=true
+IG_AUTO_REACT_LIKES=false
+IG_RESPOND_UNKNOWN=true
 
-### Events
+# Admin Configuration
+ADMIN_USERS=your_username,another_admin
 
-Your IDE should be able to auto complete the event names for you as Typescript types are in the npm package.
+# Optional: Telegram Integration
+TG_ENABLED=false
+TG_BOT_TOKEN=your_telegram_bot_token
+TG_CHAT_ID=your_telegram_chat_id
 
-| Name               | Description                                                       | Typed?    |
-| ------------------ | ----------------------------------------------------------------- | --------- |
-| realtimeSub        | Any message sent to `/ig_realtime_sub`                            | partially |
-| direct             | Direct _events_                                                   | yes       |
-| iris               | Any message sent to `/ig_message_sync` not handled by `message`   | partially |
-| message            | Direct messages                                                   | yes       |
-| clientConfigUpdate | Updates to quick experiments (may cause the client to disconnect) | yes       |
-| appPresence        | Presence updates                                                  | yes       |
-| \<keyof QueryIDs\> | Messages regarding the specified query id                         | no        |
-
-## FbnsClient
-
-FBNS is for notifications (so it's readonly).
-You can subscribe to any notification using
-
-```typescript
-ig.fbns.on('push' /* your handler */);
+# Database
+MONGODB_URL=mongodb://localhost:27017/instagram-bot
 ```
 
-You can subscribe to a specific event using
+## 🚀 Usage
 
-```typescript
-ig.fbns.on(/* desired collapseKey */, /* your handler */)
+1. **Start the bot**
+   ```bash
+   npm start
+   ```
+
+2. **Login to Instagram**
+   - The bot will prompt for login or use saved cookies
+   - For first-time setup, you might need to provide cookies
+
+3. **Test the bot**
+   - Send `.ping` to the bot via Instagram DM
+   - Use `.help` to see available commands
+
+## 📋 Available Commands
+
+### Core Commands
+- `.ping` - Test bot responsiveness
+- `.help [command]` - Show help information
+- `.commands` - List all available commands
+- `.status` - Show bot statistics (admin only)
+- `.react [emoji]` - React to message with emoji
+- `.typing [seconds]` - Show typing indicator
+
+### Admin Commands
+- `.status` - Detailed bot statistics
+- Add more admin commands by creating modules
+
+## 🔧 Creating Custom Modules
+
+Create a new file in `src/modules/`:
+
+```javascript
+export class MyModule {
+  constructor() {
+    this.name = 'my-module';
+  }
+
+  getCommands() {
+    return {
+      mycommand: {
+        description: 'My custom command',
+        usage: '.mycommand [args]',
+        adminOnly: false,
+        handler: this.handleMyCommand.bind(this)
+      }
+    };
+  }
+
+  async handleMyCommand(args, context) {
+    await context.reply('Hello from my custom command!');
+    await context.react('👋');
+  }
+
+  async process(message) {
+    // Process every message (optional)
+    return message;
+  }
+
+  async cleanup() {
+    // Cleanup when bot shuts down
+  }
+}
 ```
 
-Note: this library provides the query (actionPath/Params) as an object (actionParams)
-so you can use `actionParams.YOUR_KEY`.
+## 🔒 Security Features
 
-## Debugging
+- **Rate Limiting**: Prevents command spam
+- **Admin System**: Restrict sensitive commands
+- **Input Validation**: Sanitize user inputs
+- **Error Handling**: Graceful error recovery
+- **Connection Security**: Secure MQTT connections
 
-In order to debug the clients you can set the environment variable `DEBUG`.
-Recommended is setting it to `ig:mqtt:*`. If you want to debug the entire **instagram-private-api**, set it to `ig:*`.
-Currently, the emitted "channels" are:
+## 📊 Monitoring
 
--  `ig:mqtt:realtime`
--  `ig:mqtt:fbns`
--  `ig:mqtt:mqttot`
+The bot includes built-in monitoring:
+- Connection status tracking
+- Automatic reconnection
+- Health checks every 30 seconds
+- Detailed logging
+- Statistics collection
 
-If you want to debug the `mqtts` library set it either to `*` or `ig:*,mqtts:*`.
+## 🚨 Important Notes
 
-An example `.env` file would look like this:
+1. **Cookie Management**: Keep your Instagram cookies secure
+2. **Rate Limits**: Don't spam commands to avoid Instagram limits
+3. **Admin Users**: Set up admin users in the config
+4. **Database**: Use MongoDB for persistence (recommended)
+5. **Monitoring**: Watch logs for connection issues
 
-```
-DEBUG=ig:mqtt:*
-```
+## 🛠️ Troubleshooting
 
-## Extending
+### Connection Issues
+- Check your Instagram credentials
+- Verify network connectivity
+- Look for rate limiting messages
 
-### Mixins
+### Command Not Working
+- Ensure commands start with `.`
+- Check if user has required permissions
+- Verify module is loaded correctly
 
-Since version 1.0, there is support for basic mixins.
-A mixin is a class with an `apply()` method (extends [Mixin](src/realtime/mixins/mixin.ts) base class).
-This method is called once the RealtimeClient is constructed.
-You can use the `hook()` function to hook into methods (pre and post) and override the return value.
-By default, the [`MessageSyncMixin`](src/realtime/mixins/message-sync.mixin.ts) and the [`RealtimeSubMixin`](src/realtime/mixins/realtime-sub.mixin.ts) are used.
+### Database Issues
+- Ensure MongoDB is running
+- Check connection string in `.env`
+- Verify database permissions
 
-### TODO
+## 📈 Performance
 
--  Proper descriptions for events
--  Error handling
--  Testing... a lot.
+This real-time bot is significantly more efficient than polling bots:
+- **Instant responses** (vs 1-5 second delays)
+- **Lower resource usage** (no constant API calls)
+- **Reduced ban risk** (natural connection patterns)
+- **Better user experience** (real-time interactions)
 
-## Research
+## 🤝 Contributing
 
-All scripts to research the mqtt client are in the [`/frida/`](frida) directory.
-As the name suggests, you'll need [frida](https://frida.re/) for this.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-Start frida and connect to the process:
+## 📄 License
 
-```sh
-# assume frida is running on remote device...
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-frida -U -n com.instagram.android -l PATH_TO_SCRIPT
+## ⚠️ Disclaimer
 
-# com.instagram.threadsapp is also valid
-```
+This bot is for educational purposes. Use responsibly and comply with Instagram's Terms of Service. The authors are not responsible for any account restrictions or bans.
 
-| Script                               | Description                                |
-| :----------------------------------- | ------------------------------------------ |
-| [mqttListen.js](frida/mqttListen.js) | Prints all outgoing Realtime-MQTT messages |
+## 🆘 Support
 
-## Architecture
+If you encounter issues:
+1. Check the troubleshooting section
+2. Review the logs for error messages
+3. Open an issue on GitHub
+4. Join our community discussions
 
-### MQTToT
+---
 
-MQTToT is the underlying connection. It uses a modified version of MQTT 3.
-The modifications are small, but (at least for javascript) may not work with regular MQTT libraries
-(or at least without core modification).
-
-#### Changes
-
--  **The connect packet** doesn't contain a `clientId`. Instead,
-   it contains a zipped [thrift](https://people.apache.org/~thejas/thrift-0.9/javadoc/org/apache/thrift/protocol/TCompactProtocol.html)-payload.
-   The flags are set to contain a username and password which are in the payload and not as strings in the packet.
--  **The connack packet** can contain a payload. Regular clients would throw an error
-   as the remaining length should be equal to 0 but in this case it's intended (the MQTT 3 standard doesn't specify a payload).
-
-### RealtimeClient
-
-In earlier versions, the realtime client used an old method (built on the MQTT standard) to connect
-(it's still being used in mgp25's library), but thr RealtimeClient is using MQTToT to connect.
-In contrast to FBNS it doesn't use a device-auth, it uses cookie-auth as it was the case with the
-old method.
-
-The RealtimeClient communicates on different MQTT-Topics 8most of the time one for requesting and one for a response).
-
-### FbnsClient
-
-FBNS uses MQTToT to connect with a device-auth.
-A successful auth will return a payload in the CONNACK packet with values used for future connections.
-And a response containing a token,
-that gets sent to an instagram api endpoint (`/api/v1/push/register/`), is sent to `/fbns_reg_resp`.
-This completes the auth.
-
-Now, push notifications are sent to `/fbns_msg`.
-
-## Collaborating
-
-### Setting up the environment
-
-If you're using x86, make sure to install ARM translations for yor device
-in order to get ProxyDroid to work.
-
-Instructions are [here](https://github.com/dilame/instagram-private-api/blob/master/CONTRIBUTING.md#capturing-tls-requests).
-
-## Thanks
-
-Thanks to [valga](https://github.com/valga) for providing and maintaining the [PHP library](https://github.com/valga/fbns-react).
-This library integrates with the [instagram-private-api](https://github.com/dilame/instagram-private-api).
+**Happy botting! 🤖✨**
