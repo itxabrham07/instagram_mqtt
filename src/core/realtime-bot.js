@@ -371,6 +371,7 @@ export class InstagramRealtimeBot {
   getStats() {
     return {
       connected: this.isConnected,
+      polling: this.isPolling || false,
       reconnectAttempts: this.reconnectAttempts,
       userId: this.ig.state.cookieUserId,
       username: this.ig.state.cookieUsername
