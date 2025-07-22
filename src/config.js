@@ -25,6 +25,7 @@ export const config = {
   },
   
   database: {
-    url: process.env.MONGODB_URL || 'mongodb://localhost:27017/instagram-bot'
+    url: process.env.MONGODB_URL || 'mongodb://localhost:27017/instagram-bot',
+    enabled: process.env.MONGODB_ENABLED !== 'false'
   }
 };

@@ -32,8 +32,13 @@ class HyperInstaRealtime {
       console.log('✅ Modules loaded & handlers ready');
       
       console.log('⚡ Connecting to Instagram realtime...');
-      await this.instagramBot.connectRealtime();
-      console.log('✅ Realtime connection established');
+      try {
+        await this.instagramBot.connectRealtime();
+        console.log('✅ Realtime connection established');
+      } catch (error) {
+        console.log('⚠️ Realtime connection failed, but bot will continue...');
+        logger.warn('Realtime connection failed:', error.message);
+      }
       
       this.showLiveStatus();
       this.setupHealthCheck();

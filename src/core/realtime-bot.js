@@ -73,8 +73,8 @@ export class InstagramRealtimeBot {
         
         // Iris subscription for direct messages
         irisData: {
-          seq_id: inboxData.seq_id || 0,
-          snapshot_at_ms: inboxData.snapshot_at_ms || Date.now()
+          seq_id: inboxData?.seq_id || 0,
+          snapshot_at_ms: inboxData?.snapshot_at_ms || Date.now()
         },
         
         // Connection settings
@@ -249,11 +249,13 @@ export class InstagramRealtimeBot {
   async handleReconnection() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       logger.error('❌ Max reconnection attempts reached. Stopping bot.');
-      process.exit(1);
+      // Don't exit, just log the error and stop trying
+      logger.error('🛑 Realtime connection failed permanently. Bot will continue without realtime features.');
+      return;
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000); // Exponential backoff, max 30s
+    const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 60000); // Exponential backoff, max 60s
     
     logger.info(`🔄 Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
     
@@ -262,6 +264,7 @@ export class InstagramRealtimeBot {
         await this.connectRealtime();
       } catch (error) {
         logger.error('Reconnection failed:', error.message);
+        await this.handleReconnection();
       }
     }, delay);
   }

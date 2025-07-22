@@ -10,6 +10,15 @@ export async function connectDb() {
     return db;
   }
 
+  // Check if MongoDB is enabled
+  if (!config.database.enabled) {
+    throw new Error('MongoDB is disabled in configuration');
+  }
+
+  if (!config.database.url) {
+    throw new Error('MongoDB URL is not configured');
+  }
+
   try {
     logger.info('🔌 Connecting to MongoDB...');
     
@@ -48,6 +57,10 @@ export async function disconnectDb() {
 export const dbUtils = {
   async saveMessage(message) {
     try {
+      if (!config.database?.enabled) {
+        return true; // Skip if disabled
+      }
+
       const db = await connectDb();
       const collection = db.collection('messages');
       
@@ -67,6 +80,10 @@ export const dbUtils = {
 
   async getMessageHistory(threadId, limit = 50) {
     try {
+      if (!config.database?.enabled) {
+        return []; // Return empty if disabled
+      }
+
       const db = await connectDb();
       const collection = db.collection('messages');
       
@@ -85,6 +102,10 @@ export const dbUtils = {
 
   async saveUserStats(userId, username, stats) {
     try {
+      if (!config.database?.enabled) {
+        return true; // Skip if disabled
+      }
+
       const db = await connectDb();
       const collection = db.collection('user_stats');
       
@@ -112,6 +133,10 @@ export const dbUtils = {
 
   async getUserStats(userId) {
     try {
+      if (!config.database?.enabled) {
+        return null; // Return null if disabled
+      }
+
       const db = await connectDb();
       const collection = db.collection('user_stats');
       
