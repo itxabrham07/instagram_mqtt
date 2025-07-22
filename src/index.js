@@ -1,3 +1,7 @@
+// Re-export the instagram_mqtt library components
+export { withRealtime, withFbns, withFbnsAndRealtime, IgApiClientExt } from 'instagram_mqtt';
+
+// Main application entry point
 import { InstagramRealtimeBot } from './core/realtime-bot.js';
 import { TelegramBridge } from './tg-bridge/bridge.js';
 import { logger } from './utils/utils.js';
@@ -56,8 +60,8 @@ class HyperInstaRealtime {
       if (!this.isShuttingDown) {
         const stats = this.instagramBot.getStats();
         
-        if (!stats.connected) {
-          logger.warn('⚠️ Realtime connection lost - reconnection should be automatic');
+        if (!stats.connected && !stats.polling) {
+          logger.warn('⚠️ Bot is not connected via realtime or polling');
         }
         
         // Log stats every 5 minutes
@@ -82,25 +86,27 @@ class HyperInstaRealtime {
 
   showLiveStatus() {
     const uptime = Date.now() - this.startTime;
+    const stats = this.instagramBot.getStats();
+    
     console.clear();
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
 ║    🚀 HYPER INSTA REALTIME - LIVE & OPERATIONAL            ║
 ║                                                              ║
-║    ✅ Instagram: Connected via MQTT Realtime               ║
+║    ${stats.connected ? '✅ Instagram: Connected via MQTT Realtime' : stats.polling ? '🔄 Instagram: Safe Polling Mode (Flagged)' : '❌ Instagram: Disconnected'}               ║
 ║    ${this.telegramBridge ? '✅' : '❌'} Telegram: ${this.telegramBridge ? 'Connected & Bridged' : 'Disabled'}                        ║
 ║    ⚡ Startup Time: ${Math.round(uptime)}ms                                  ║
 ║    🕒 Started: ${this.startTime.toLocaleTimeString()}                                ║
 ║                                                              ║
-║    🎯 Ready for INSTANT real-time commands...              ║
-║    🛡️ No more polling - Instagram friendly!                ║
+║    🎯 Ready for ${stats.connected ? 'INSTANT real-time' : 'safe polling'} commands...              ║
+║    ${stats.connected ? '🛡️ No more polling - Instagram friendly!' : '🛡️ Safe polling mode - won\'t get more flags!'}                ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 
-🔥 Bot is running with REAL-TIME MQTT!
+${stats.connected ? '🔥 Bot is running with REAL-TIME MQTT!' : '🔄 Bot is running in SAFE POLLING MODE!'}
 💡 Type .help in Instagram to see all commands
-🚫 No more API polling - much safer from flags!
+${stats.connected ? '🚫 No more API polling - much safer from flags!' : '⚠️ Account flagged - using safe 45s intervals'}
     `);
   }
 
@@ -145,8 +151,11 @@ class HyperInstaRealtime {
   }
 }
 
-const bot = new HyperInstaRealtime();
-bot.start().catch((error) => {
-  console.error('❌ Fatal error:', error);
-  process.exit(1);
-});
+// Only run if this is the main module
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const bot = new HyperInstaRealtime();
+  bot.start().catch((error) => {
+    console.error('❌ Fatal error:', error);
+    process.exit(1);
+  });
+}

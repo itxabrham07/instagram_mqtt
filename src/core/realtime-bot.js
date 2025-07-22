@@ -1,11 +1,10 @@
-import { withRealtime } from 'instagram_mqtt';
+import { withRealtime } from '../index.js';
 import { IgApiClient } from 'instagram-private-api';
 import { logger } from '../utils/utils.js';
 import { config } from '../config.js';
 import { SessionManager } from './session-manager.js';
 import { MessageHandler } from './message-handler.js';
 import { ModuleManager } from './module-manager.js';
-import { GraphQLSubscriptions } from 'instagram_mqtt';
 
 export class InstagramRealtimeBot {
   constructor() {
@@ -14,9 +13,14 @@ export class InstagramRealtimeBot {
     this.sessionManager = new SessionManager(this.ig);
     this.moduleManager = new ModuleManager(this);
     this.messageHandler = new MessageHandler(this, this.moduleManager, null);
-    this.isConnected = false;
+    
+    // Connection state
+    this.isRealtimeConnected = false;
+    this.isPolling = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = 3;
+    this.pollingInterval = null;
+    this.lastMessageCheck = new Date();
   }
 
   async login() {
@@ -55,28 +59,30 @@ export class InstagramRealtimeBot {
     try {
       logger.info('🔌 Connecting to Instagram realtime...');
       
-      // Setup realtime event listeners
-      this.setupRealtimeListeners();
-      
       // Try to get initial inbox data for iris subscription
       let inboxData = null;
       try {
         inboxData = await this.ig.feed.directInbox().request();
+        logger.info('✅ Inbox access successful');
       } catch (error) {
         logger.warn('⚠️ Cannot access inbox (account may be flagged), using fallback polling...');
-        // Start fallback polling instead
         await this.startFallbackPolling();
         return;
       }
+      
+      // Setup realtime event listeners
+      this.setupRealtimeListeners();
       
       // Connect to realtime with subscriptions
       await this.ig.realtime.connect({
         // GraphQL subscriptions for various real-time events
         graphQlSubs: [
-          GraphQLSubscriptions.getAppPresenceSubscription(),
-          GraphQLSubscriptions.getDirectStatusSubscription(),
-          GraphQLSubscriptions.getDirectTypingSubscription(this.ig.state.cookieUserId),
-          GraphQLSubscriptions.getClientConfigUpdateSubscription(),
+          // App presence subscription
+          '1/graphqlsubscriptions/17846944882223835/{"input_data":{"client_subscription_id":"' + this.generateUUID() + '"}}',
+          // Direct status subscription  
+          '1/graphqlsubscriptions/17854499065530643/{"input_data":{"client_subscription_id":"' + this.generateUUID() + '"}}',
+          // Direct typing subscription
+          '1/graphqlsubscriptions/17867973967082385/{"input_data":{"user_id":"' + this.ig.state.cookieUserId + '"}}',
         ],
         
         // Iris subscription for direct messages
@@ -91,7 +97,7 @@ export class InstagramRealtimeBot {
         }
       });
 
-      this.isConnected = true;
+      this.isRealtimeConnected = true;
       this.reconnectAttempts = 0;
       logger.info('✅ Instagram realtime connected successfully');
       
@@ -125,7 +131,6 @@ export class InstagramRealtimeBot {
     this.ig.realtime.on('direct', async (directData) => {
       try {
         if (directData.op === 'replace' && directData.path?.includes('activity_indicator_id')) {
-          // Someone is typing
           logger.debug(`User typing in thread: ${this.extractThreadId(directData.path)}`);
         }
       } catch (error) {
@@ -133,22 +138,17 @@ export class InstagramRealtimeBot {
       }
     });
 
-    // Handle presence updates
-    this.ig.realtime.on('appPresence', (presenceData) => {
-      logger.debug('Presence update:', presenceData.presence_event);
-    });
-
     // Handle connection errors
     this.ig.realtime.on('error', async (error) => {
       logger.error('Realtime connection error:', error.message);
-      this.isConnected = false;
+      this.isRealtimeConnected = false;
       await this.handleReconnection();
     });
 
     // Handle disconnections
     this.ig.realtime.on('disconnect', async () => {
       logger.warn('⚠️ Realtime connection lost');
-      this.isConnected = false;
+      this.isRealtimeConnected = false;
       await this.handleReconnection();
     });
 
@@ -199,16 +199,137 @@ export class InstagramRealtimeBot {
         threadTitle: thread.thread_title || 'Direct Message',
         type: message.item_type || 'text',
         shouldForward: true,
-        rawMessage: message // Keep raw message for advanced processing
+        rawMessage: message
       };
 
-      logger.info(`📨 New message from @${processedMessage.senderUsername}: ${processedMessage.text}`);
+      logger.info(`📨 [REALTIME] New message from @${processedMessage.senderUsername}: ${processedMessage.text}`);
       
       // Process the message through our handler
       await this.messageHandler.handleMessage(processedMessage);
 
     } catch (error) {
       logger.error('Error processing realtime message:', error.message);
+    }
+  }
+
+  // FALLBACK POLLING SYSTEM FOR FLAGGED ACCOUNTS
+  async startFallbackPolling() {
+    if (this.isPolling) return;
+    
+    this.isPolling = true;
+    this.isRealtimeConnected = false;
+    
+    logger.info('🔄 Starting fallback polling mode (safe for flagged accounts)...');
+    
+    // Use longer intervals to avoid further flags
+    const pollInterval = 45000; // 45 seconds - much safer
+    
+    this.pollingInterval = setInterval(async () => {
+      if (this.isPolling) {
+        try {
+          await this.checkForNewMessages();
+        } catch (error) {
+          if (error.message.includes('login_required')) {
+            logger.warn('Login required, attempting re-login...');
+            try {
+              await this.login();
+            } catch (loginError) {
+              logger.error('Re-login failed:', loginError.message);
+            }
+          } else if (error.message.includes('403') || error.message.includes('429')) {
+            logger.warn('Rate limited, increasing poll interval...');
+            // Temporarily increase interval when rate limited
+            clearInterval(this.pollingInterval);
+            setTimeout(() => {
+              if (this.isPolling) {
+                this.startFallbackPolling();
+              }
+            }, 120000); // Wait 2 minutes before resuming
+          }
+        }
+      }
+    }, pollInterval);
+    
+    logger.info(`✅ Fallback polling started (${pollInterval/1000}s intervals)`);
+  }
+
+  async checkForNewMessages() {
+    try {
+      const inboxFeed = this.ig.feed.directInbox();
+      const inbox = await inboxFeed.items();
+      
+      if (!inbox?.length) return;
+
+      // Only check first 3 threads to reduce API calls
+      for (const thread of inbox.slice(0, 3)) {
+        await this.checkThreadMessages(thread);
+        await this.delay(3000); // 3 second delay between threads
+      }
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async checkThreadMessages(thread) {
+    try {
+      const threadFeed = this.ig.feed.directThread({ thread_id: thread.thread_id });
+      const messages = await threadFeed.items();
+      
+      if (!messages?.length) return;
+
+      const latestMessage = messages[0];
+      
+      if (this.isNewMessage(latestMessage)) {
+        await this.handlePollingMessage(latestMessage, thread);
+      }
+
+    } catch (error) {
+      // Silent fail for thread errors to avoid spam
+      logger.debug('Thread check error:', error.message);
+    }
+  }
+
+  isNewMessage(message) {
+    const messageTime = new Date(message.timestamp / 1000);
+    const isNew = messageTime > this.lastMessageCheck;
+    
+    if (isNew) {
+      this.lastMessageCheck = messageTime;
+    }
+    
+    return isNew;
+  }
+
+  async handlePollingMessage(message, thread) {
+    try {
+      // Skip our own messages
+      if (message.user_id?.toString() === this.ig.state.cookieUserId) {
+        return;
+      }
+
+      const sender = thread.users.find(u => u.pk.toString() === message.user_id.toString());
+      
+      const processedMessage = {
+        id: message.item_id,
+        text: message.text || this.extractMessageText(message),
+        sender: message.user_id,
+        senderUsername: sender?.username || 'Unknown',
+        senderDisplayName: sender?.full_name || sender?.username || 'Unknown',
+        timestamp: new Date(message.timestamp / 1000),
+        threadId: thread.thread_id,
+        threadTitle: thread.thread_title || 'Direct Message',
+        type: message.item_type || 'text',
+        shouldForward: true,
+        rawMessage: message
+      };
+
+      logger.info(`📨 [POLLING] New message from @${processedMessage.senderUsername}: ${processedMessage.text}`);
+      
+      await this.messageHandler.handleMessage(processedMessage);
+
+    } catch (error) {
+      logger.error('Handle polling message error:', error.message);
     }
   }
 
@@ -240,7 +361,6 @@ export class InstagramRealtimeBot {
 
   async getThreadInfo(threadId) {
     try {
-      // Try to get from cache first (you might want to implement caching)
       const thread = await this.ig.entity.directThread(threadId).info();
       return thread;
     } catch (error) {
@@ -263,7 +383,7 @@ export class InstagramRealtimeBot {
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 60000); // Exponential backoff, max 60s
+    const delay = Math.min(4000 * Math.pow(2, this.reconnectAttempts), 60000);
     
     logger.info(`🔄 Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
     
@@ -280,7 +400,7 @@ export class InstagramRealtimeBot {
   async sendMessage(threadId, text) {
     try {
       // Use realtime client for sending if available
-      if (this.ig.realtime && this.isConnected) {
+      if (this.ig.realtime && this.isRealtimeConnected) {
         await this.ig.realtime.direct.sendText({
           threadId: threadId,
           text: text
@@ -298,7 +418,7 @@ export class InstagramRealtimeBot {
 
   async sendReaction(threadId, itemId, emoji = '❤️') {
     try {
-      if (this.ig.realtime && this.isConnected) {
+      if (this.ig.realtime && this.isRealtimeConnected) {
         await this.ig.realtime.direct.sendReaction({
           threadId: threadId,
           itemId: itemId,
@@ -315,7 +435,7 @@ export class InstagramRealtimeBot {
 
   async markAsSeen(threadId, itemId) {
     try {
-      if (this.ig.realtime && this.isConnected) {
+      if (this.ig.realtime && this.isRealtimeConnected) {
         await this.ig.realtime.direct.markAsSeen({
           threadId: threadId,
           itemId: itemId
@@ -330,7 +450,7 @@ export class InstagramRealtimeBot {
 
   async indicateTyping(threadId, isTyping = true) {
     try {
-      if (this.ig.realtime && this.isConnected) {
+      if (this.ig.realtime && this.isRealtimeConnected) {
         await this.ig.realtime.direct.indicateActivity({
           threadId: threadId,
           isActive: isTyping
@@ -345,9 +465,17 @@ export class InstagramRealtimeBot {
 
   async disconnect() {
     try {
-      logger.info('🛑 Disconnecting from Instagram realtime...');
-      this.isConnected = false;
+      logger.info('🛑 Disconnecting from Instagram...');
       
+      // Stop polling
+      if (this.pollingInterval) {
+        clearInterval(this.pollingInterval);
+        this.pollingInterval = null;
+      }
+      this.isPolling = false;
+      this.isRealtimeConnected = false;
+      
+      // Disconnect realtime if connected
       if (this.ig.realtime) {
         await this.ig.realtime.disconnect();
       }
@@ -362,16 +490,24 @@ export class InstagramRealtimeBot {
     }
   }
 
-  // Utility method to check connection status
-  isRealtimeConnected() {
-    return this.isConnected && this.ig.realtime;
+  // Utility methods
+  generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  async delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // Method to get bot statistics
   getStats() {
     return {
-      connected: this.isConnected,
-      polling: this.isPolling || false,
+      connected: this.isRealtimeConnected,
+      polling: this.isPolling,
       reconnectAttempts: this.reconnectAttempts,
       userId: this.ig.state.cookieUserId,
       username: this.ig.state.cookieUsername

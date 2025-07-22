@@ -55,14 +55,14 @@ export class CoreModule {
     const statusMessage = `
 📊 **Bot Status**
 
-🔗 **Connection:** ${stats.connected ? '✅ Realtime Connected' : stats.polling ? '🔄 Polling Mode' : '❌ Disconnected'}
+🔗 **Connection:** ${stats.connected ? '✅ Realtime Connected' : stats.polling ? '🔄 Safe Polling Mode (45s)' : '❌ Disconnected'}
 🔄 **Reconnects:** ${stats.reconnectAttempts}
 👤 **User ID:** ${stats.userId}
 📱 **Username:** @${stats.username}
 ⏱️ **Uptime:** ${hours}h ${minutes}m
 🧠 **Memory:** ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB
 
-${stats.connected ? '🚀 **Realtime MQTT Active**' : stats.polling ? '🔄 **Fallback Polling Mode**' : '❌ **Disconnected**'}
+${stats.connected ? '🚀 **Realtime MQTT Active**' : stats.polling ? '🔄 **Safe Polling Mode (Account Flagged)**' : '❌ **Disconnected**'}
     `.trim();
 
     await context.reply(statusMessage);
